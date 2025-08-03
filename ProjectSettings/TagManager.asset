@@ -4,12 +4,9 @@
 TagManager:
   serializedVersion: 3
   tags:
-  - Unmarked
-  - Marked
-  - LastUM
-  - LastM
-  - Unseen
   - TEST
+  - MARKED
+  - UNMARKED
   layers:
   - Default
   - TransparentFX

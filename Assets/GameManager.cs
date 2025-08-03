@@ -37,7 +37,7 @@ public class GameManager : MonoBehaviour
         OVRInput.Button.SecondaryHandTrigger
     };
 
-    // Keep track of original colors so we can restore on exit
+    // Keep track of original colors so we can restore on exit (used for TEST logic)
     private readonly Dictionary<Renderer, Color> _originalColors = new();
 
     void Awake()
@@ -53,18 +53,18 @@ public class GameManager : MonoBehaviour
     {
         UpdateColliderState();
 
-        if (hasInitialized || pathManager == null)
-            return;
-
-        string startCode = pathManager.string_start;
-        bool started = pathManager.game_start;
-        bool isValidStart = !string.IsNullOrWhiteSpace(startCode);
-
-        if (started && isValidStart)
+        if (!hasInitialized && pathManager != null)
         {
-            hasInitialized = true;
-            Debug.Log("[GameManager] Game start conditions met. Beginning nav point loading...");
-            StartCoroutine(LoadNavPointsFromFile(startCode));
+            string startCode = pathManager.string_start;
+            bool started = pathManager.game_start;
+            bool isValidStart = !string.IsNullOrWhiteSpace(startCode);
+
+            if (started && isValidStart)
+            {
+                hasInitialized = true;
+                Debug.Log("[GameManager] Game start conditions met. Beginning nav point loading...");
+                StartCoroutine(LoadNavPointsFromFile(startCode));
+            }
         }
     }
 
@@ -104,6 +104,9 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator LoadNavPointsFromFile(string fileName)
     {
+        // Clear any previously loaded nav points before loading new ones
+        ClearExistingNavPoints();
+
         string anchorsJson = Path.Combine(Application.persistentDataPath, "anchors.json");
         if (!File.Exists(anchorsJson))
             yield break;
@@ -150,14 +153,17 @@ public class GameManager : MonoBehaviour
             Quaternion worldRot = refRot * new Quaternion(info.relQx, info.relQy, info.relQz, info.relQw);
 
             var go = Instantiate(navPointPrefab, worldPos, worldRot);
+
+            // Only the first nav point stays active; others are deactivated.
+            if (i > 0)
+                go.SetActive(false);
+
             navPoints.Add(go);
             latestNavPoint = go;
 
             if (i == 0)
                 firstNavPoint = go;
         }
-
-
 
         Debug.Log($"[GameManager] Loaded and instantiated {navPoints.Count} nav points from '{fileName}.json'");
     }
@@ -173,9 +179,55 @@ public class GameManager : MonoBehaviour
 
     void OnTriggerEnter(Collider other)
     {
+        // NavPoint progression logic: look for UNMARKED nav point when game is active
+        if (hasInitialized && pathManager != null && pathManager.game_start)
+        {
+            GameObject navPoint = null;
 
+            if (other.CompareTag("UNMARKED"))
+                navPoint = other.gameObject;
+            else if (other.transform.parent != null && other.transform.parent.CompareTag("UNMARKED"))
+                navPoint = other.transform.parent.gameObject;
 
-        // New TEST tag logic: change material color to green
+            if (navPoint != null)
+            {
+                // Change all renderer materials to white
+                var renderers = navPoint.GetComponentsInChildren<Renderer>();
+                foreach (var rend in renderers)
+                {
+                    if (!_originalColors.ContainsKey(rend))
+                        _originalColors[rend] = rend.material.color;
+                    rend.material.color = Color.white;
+                }
+
+                // Deactivate children (e.g., Select1, Select2)
+                foreach (Transform child in navPoint.transform)
+                {
+                    child.gameObject.SetActive(false);
+                }
+
+                // Ensure tag remains/sets to UNMARKED per spec (collider disabled prevents retrigger)
+                navPoint.tag = "UNMARKED";
+
+                // Disable its own collider
+                var npCollider = navPoint.GetComponent<Collider>();
+                if (npCollider != null)
+                    npCollider.enabled = false;
+
+                // Advance to next nav point in sequence
+                int currentIndex = navPoints.IndexOf(navPoint);
+                if (currentIndex >= 0 && currentIndex + 1 < navPoints.Count)
+                {
+                    var next = navPoints[currentIndex + 1];
+                    next.SetActive(true);
+                    latestNavPoint = next;
+                }
+
+                return; // handled nav point, skip TEST logic
+            }
+        }
+
+        // Existing TEST tag logic: change material color to green
         GameObject testObject = null;
         if (other.CompareTag("TEST"))
             testObject = other.gameObject;
@@ -221,6 +273,235 @@ public class GameManager : MonoBehaviour
     public GameObject GetLatestNavPoint() => latestNavPoint;
     public IReadOnlyList<GameObject> GetAllNavPoints() => navPoints.AsReadOnly();
 }
+
+
+
+
+
+
+//using System.Collections;
+//using System.Collections.Generic;
+//using System.IO;
+//using System.Text;
+//using UnityEngine;
+
+//public class GameManager : MonoBehaviour
+//{
+//    [Header("Dependencies")]
+//    public CreatePathManager pathManager;
+//    public GameObject navPointPrefab;
+
+//    [Header("Collider Control")]
+//    [SerializeField] private Collider handCollider; // can be assigned manually; falls back to GetComponent<Collider>()
+
+//    private List<GameObject> navPoints = new List<GameObject>();
+//    private GameObject firstNavPoint;
+//    private GameObject latestNavPoint;
+//    private bool hasInitialized = false;
+
+//    // Buttons to poll (digital)
+//    private static readonly OVRInput.Button[] _buttonsToCheck = new[]
+//    {
+//        OVRInput.Button.One,
+//        OVRInput.Button.Two,
+//        OVRInput.Button.Three,
+//        OVRInput.Button.Four,
+//        OVRInput.Button.Start,
+//        OVRInput.Button.Back,
+//        OVRInput.Button.PrimaryThumbstick,
+//        OVRInput.Button.SecondaryThumbstick,
+//        OVRInput.Button.PrimaryIndexTrigger,
+//        OVRInput.Button.SecondaryIndexTrigger,
+//        OVRInput.Button.PrimaryShoulder,
+//        OVRInput.Button.SecondaryShoulder,
+//        OVRInput.Button.PrimaryHandTrigger,
+//        OVRInput.Button.SecondaryHandTrigger
+//    };
+
+//    // Keep track of original colors so we can restore on exit
+//    private readonly Dictionary<Renderer, Color> _originalColors = new();
+
+//    void Awake()
+//    {
+//        if (handCollider == null)
+//            handCollider = GetComponent<Collider>();
+
+//        if (handCollider == null)
+//            Debug.LogWarning("[GameManager] No collider found on this GameObject or assigned to handCollider.");
+//    }
+
+//    void Update()
+//    {
+//        UpdateColliderState();
+
+//        if (hasInitialized || pathManager == null)
+//            return;
+
+//        string startCode = pathManager.string_start;
+//        bool started = pathManager.game_start;
+//        bool isValidStart = !string.IsNullOrWhiteSpace(startCode);
+
+//        if (started && isValidStart)
+//        {
+//            hasInitialized = true;
+//            Debug.Log("[GameManager] Game start conditions met. Beginning nav point loading...");
+//            StartCoroutine(LoadNavPointsFromFile(startCode));
+//        }
+//    }
+
+//    private void UpdateColliderState()
+//    {
+//        if (handCollider == null)
+//            return;
+
+//        bool anyButtonDown = false;
+
+//        // Digital buttons
+//        foreach (var btn in _buttonsToCheck)
+//        {
+//            if (OVRInput.Get(btn))
+//            {
+//                anyButtonDown = true;
+//                break;
+//            }
+//        }
+
+//        // Analog triggers / grips
+//        if (!anyButtonDown)
+//        {
+//            if (OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger) > 0.1f ||
+//                OVRInput.Get(OVRInput.Axis1D.SecondaryIndexTrigger) > 0.1f ||
+//                OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger) > 0.1f ||
+//                OVRInput.Get(OVRInput.Axis1D.SecondaryHandTrigger) > 0.1f)
+//            {
+//                anyButtonDown = true;
+//            }
+//        }
+
+//        bool desiredEnabled = !anyButtonDown;
+//        if (handCollider.enabled != desiredEnabled)
+//            handCollider.enabled = desiredEnabled;
+//    }
+
+//    private IEnumerator LoadNavPointsFromFile(string fileName)
+//    {
+//        string anchorsJson = Path.Combine(Application.persistentDataPath, "anchors.json");
+//        if (!File.Exists(anchorsJson))
+//            yield break;
+
+//        bool anchorsLoaded = false;
+//        List<OVRSpatialAnchor> loadedAnchors = null;
+//        void OnAnchorsLoaded(List<OVRSpatialAnchor> list)
+//        {
+//            anchorsLoaded = true;
+//            loadedAnchors = list;
+//        }
+
+//        SpatialAnchorManager.Instance.OnAnchorsLoaded += OnAnchorsLoaded;
+//        SpatialAnchorManager.Instance.LoadAnchorsFromJson();
+
+//        float timer = 0f, timeout = 5f;
+//        while (!anchorsLoaded && timer < timeout)
+//        {
+//            timer += Time.deltaTime;
+//            yield return null;
+//        }
+//        SpatialAnchorManager.Instance.OnAnchorsLoaded -= OnAnchorsLoaded;
+
+//        if (!anchorsLoaded || loadedAnchors == null || loadedAnchors.Count == 0)
+//            yield break;
+
+//        Transform refT = loadedAnchors[0].transform;
+//        Vector3 refPos = refT.position;
+//        Quaternion refRot = refT.rotation;
+
+//        string pathFile = Path.Combine(Application.persistentDataPath, fileName + ".json");
+//        if (!File.Exists(pathFile))
+//            yield break;
+
+//        string json = File.ReadAllText(pathFile, Encoding.UTF8);
+//        var data = JsonUtility.FromJson<PathData>(json);
+//        if (data == null || data.points == null)
+//            yield break;
+
+//        for (int i = 0; i < data.points.Count; i++)
+//        {
+//            var info = data.points[i];
+//            Vector3 worldPos = refRot * new Vector3(info.relX, info.relY, info.relZ) + refPos;
+//            Quaternion worldRot = refRot * new Quaternion(info.relQx, info.relQy, info.relQz, info.relQw);
+
+//            var go = Instantiate(navPointPrefab, worldPos, worldRot);
+//            navPoints.Add(go);
+//            latestNavPoint = go;
+
+//            if (i == 0)
+//                firstNavPoint = go;
+//        }
+
+
+
+//        Debug.Log($"[GameManager] Loaded and instantiated {navPoints.Count} nav points from '{fileName}.json'");
+//    }
+
+//    private void ClearExistingNavPoints()
+//    {
+//        foreach (var point in navPoints)
+//            if (point != null) Destroy(point);
+//        navPoints.Clear();
+//        firstNavPoint = null;
+//        latestNavPoint = null;
+//    }
+
+//    void OnTriggerEnter(Collider other)
+//    {
+
+
+//        // New TEST tag logic: change material color to green
+//        GameObject testObject = null;
+//        if (other.CompareTag("TEST"))
+//            testObject = other.gameObject;
+//        else if (other.transform.parent != null && other.transform.parent.CompareTag("TEST"))
+//            testObject = other.transform.parent.gameObject;
+
+//        if (testObject != null)
+//        {
+//            var renderers = testObject.GetComponentsInChildren<Renderer>();
+//            foreach (var rend in renderers)
+//            {
+//                if (!_originalColors.ContainsKey(rend))
+//                    _originalColors[rend] = rend.material.color;
+//                rend.material.color = Color.green;
+//            }
+//        }
+//    }
+
+//    void OnTriggerExit(Collider other)
+//    {
+//        // Restore original color if we exited a TEST object
+//        GameObject testObject = null;
+//        if (other.CompareTag("TEST"))
+//            testObject = other.gameObject;
+//        else if (other.transform.parent != null && other.transform.parent.CompareTag("TEST"))
+//            testObject = other.transform.parent.gameObject;
+
+//        if (testObject != null)
+//        {
+//            var renderers = testObject.GetComponentsInChildren<Renderer>();
+//            foreach (var rend in renderers)
+//            {
+//                if (_originalColors.TryGetValue(rend, out var original))
+//                {
+//                    rend.material.color = original;
+//                    _originalColors.Remove(rend);
+//                }
+//            }
+//        }
+//    }
+
+//    public GameObject GetFirstNavPoint() => firstNavPoint;
+//    public GameObject GetLatestNavPoint() => latestNavPoint;
+//    public IReadOnlyList<GameObject> GetAllNavPoints() => navPoints.AsReadOnly();
+//}
 
 
 

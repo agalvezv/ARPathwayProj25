@@ -260,7 +260,7 @@ GameObject:
   - component: {fileID: 805189967924158601}
   m_Layer: 0
   m_Name: NavPath
-  m_TagString: TEST
+  m_TagString: UNMARKED
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
