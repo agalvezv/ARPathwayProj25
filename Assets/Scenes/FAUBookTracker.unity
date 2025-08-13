@@ -16112,6 +16112,14 @@ MonoBehaviour:
   pathManager: {fileID: 721337320}
   navPointPrefab: {fileID: 6551162342726381673, guid: 7563e09f7d4e116458bc6ecb92370da2, type: 3}
   handCollider: {fileID: 953345943}
+  unmarkedHitSound: {fileID: 8300000, guid: e2afee59067d7d240a4cb66904918b05, type: 3}
+  unmarkedHitVolume: 1
+  specialHitSound: {fileID: 8300000, guid: de8a787096b659f459aa6092f25a4dec, type: 3}
+  specialHitVolume: 1
+  thumbsUpPrefab: {fileID: 5105886624032530325, guid: deaffe3743a5f7f4694ee45165a71716, type: 3}
+  thumbsUpYOffset: 0.2
+  thumbsUpLifetime: 2
+  specialCleanupDelay: 3
 --- !u!135 &953345943
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -28928,6 +28936,14 @@ MonoBehaviour:
   pathManager: {fileID: 721337320}
   navPointPrefab: {fileID: 0}
   handCollider: {fileID: 1686362023}
+  unmarkedHitSound: {fileID: 0}
+  unmarkedHitVolume: 1
+  specialHitSound: {fileID: 0}
+  specialHitVolume: 1
+  thumbsUpPrefab: {fileID: 0}
+  thumbsUpYOffset: 0.2
+  thumbsUpLifetime: 2
+  specialCleanupDelay: 3
 --- !u!1 &1689334261
 GameObject:
   m_ObjectHideFlags: 0

@@ -13,6 +13,19 @@ public class GameManager : MonoBehaviour
     [Header("Collider Control")]
     [SerializeField] private Collider handCollider; // can be assigned manually; falls back to GetComponent<Collider>()
 
+    [Header("Audio")]
+    public AudioClip unmarkedHitSound;
+    [Range(0f, 1f)] public float unmarkedHitVolume = 1f;
+    public AudioClip specialHitSound;
+    [Range(0f, 1f)] public float specialHitVolume = 1f;
+    private AudioSource _audioSource;
+
+    [Header("SPECIAL Feedback")]
+    public GameObject thumbsUpPrefab;
+    public float thumbsUpYOffset = 0.2f;
+    public float thumbsUpLifetime = 2f;
+    public float specialCleanupDelay = 3f;
+
     private List<GameObject> navPoints = new List<GameObject>();
     private GameObject firstNavPoint;
     private GameObject latestNavPoint;
@@ -47,6 +60,12 @@ public class GameManager : MonoBehaviour
 
         if (handCollider == null)
             Debug.LogWarning("[GameManager] No collider found on this GameObject or assigned to handCollider.");
+
+        // AudioSource setup (for hit sounds)
+        _audioSource = GetComponent<AudioSource>();
+        if (_audioSource == null)
+            _audioSource = gameObject.AddComponent<AudioSource>();
+        _audioSource.playOnAwake = false;
     }
 
     void Update()
@@ -165,6 +184,14 @@ public class GameManager : MonoBehaviour
                 firstNavPoint = go;
         }
 
+        // Tag the last nav point as SPECIAL
+        if (navPoints.Count > 0)
+        {
+            var last = navPoints[navPoints.Count - 1];
+            last.tag = "SPECIAL";
+            latestNavPoint = last; // keep consistency
+        }
+
         Debug.Log($"[GameManager] Loaded and instantiated {navPoints.Count} nav points from '{fileName}.json'");
     }
 
@@ -179,11 +206,24 @@ public class GameManager : MonoBehaviour
 
     void OnTriggerEnter(Collider other)
     {
-        // NavPoint progression logic: look for UNMARKED nav point when game is active
+        // NavPoint progression logic: first handle SPECIAL, then UNMARKED, when game is active
         if (hasInitialized && pathManager != null && pathManager.game_start)
         {
-            GameObject navPoint = null;
+            // SPECIAL logic
+            GameObject specialNavPoint = null;
+            if (other.CompareTag("SPECIAL"))
+                specialNavPoint = other.gameObject;
+            else if (other.transform.parent != null && other.transform.parent.CompareTag("SPECIAL"))
+                specialNavPoint = other.transform.parent.gameObject;
 
+            if (specialNavPoint != null)
+            {
+                StartCoroutine(HandleSpecialNavPointHit(specialNavPoint));
+                return; // skip further processing
+            }
+
+            // UNMARKED logic
+            GameObject navPoint = null;
             if (other.CompareTag("UNMARKED"))
                 navPoint = other.gameObject;
             else if (other.transform.parent != null && other.transform.parent.CompareTag("UNMARKED"))
@@ -191,6 +231,16 @@ public class GameManager : MonoBehaviour
 
             if (navPoint != null)
             {
+                // Play sound for UNMARKED hit
+                if (unmarkedHitSound != null)
+                {
+                    _audioSource.PlayOneShot(unmarkedHitSound, unmarkedHitVolume);
+                }
+                else
+                {
+                    Debug.LogWarning("[GameManager] UNMARKED hit sound clip not assigned.");
+                }
+
                 // Change all renderer materials to white
                 var renderers = navPoint.GetComponentsInChildren<Renderer>();
                 foreach (var rend in renderers)
@@ -246,6 +296,74 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    private IEnumerator HandleSpecialNavPointHit(GameObject navPoint)
+    {
+        // Play special sound
+        if (specialHitSound != null)
+        {
+            _audioSource.PlayOneShot(specialHitSound, specialHitVolume);
+        }
+        else
+        {
+            Debug.LogWarning("[GameManager] SPECIAL hit sound clip not assigned.");
+        }
+
+        // Change all renderer materials to white
+        var renderers = navPoint.GetComponentsInChildren<Renderer>();
+        foreach (var rend in renderers)
+        {
+            if (!_originalColors.ContainsKey(rend))
+                _originalColors[rend] = rend.material.color;
+            rend.material.color = Color.white;
+        }
+
+        // Deactivate children
+        foreach (Transform child in navPoint.transform)
+        {
+            child.gameObject.SetActive(false);
+        }
+
+        // Ensure tag remains SPECIAL
+        navPoint.tag = "SPECIAL";
+
+        // Disable its own collider
+        var npCollider = navPoint.GetComponent<Collider>();
+        if (npCollider != null)
+            npCollider.enabled = false;
+
+        // Instantiate thumbs up above the nav point
+        if (thumbsUpPrefab != null)
+        {
+            Vector3 spawnPos = navPoint.transform.position + Vector3.up * thumbsUpYOffset;
+            var thumbs = Instantiate(thumbsUpPrefab, spawnPos, Quaternion.identity);
+            Destroy(thumbs, thumbsUpLifetime);
+        }
+        else
+        {
+            Debug.LogWarning("[GameManager] thumbsUpPrefab not assigned.");
+        }
+
+        // Wait before cleanup
+        yield return new WaitForSeconds(specialCleanupDelay);
+
+        // Reset state
+        hasInitialized = false;
+        if (pathManager != null)
+        {
+            pathManager.string_start = "";
+            pathManager.game_start = false;
+        }
+
+        // Clear nav points list
+        ClearExistingNavPoints();
+
+        // Clear only anchor prefabs if available
+        if (SpatialAnchorManager.Instance != null)
+        {
+            SpatialAnchorManager.Instance.ClearOnlyAnchorPrefabs();
+        }
+    }
+
     void OnTriggerExit(Collider other)
     {
         // Restore original color if we exited a TEST object
@@ -273,7 +391,6 @@ public class GameManager : MonoBehaviour
     public GameObject GetLatestNavPoint() => latestNavPoint;
     public IReadOnlyList<GameObject> GetAllNavPoints() => navPoints.AsReadOnly();
 }
-
 
 
 
