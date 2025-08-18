@@ -21,6 +21,19 @@ public class CreatePathManager : MonoBehaviour
     [Header("QR Scanner")]
     public QRPhotoScanner qrScanner;
 
+    [Header("Scan UI (shown only while scanning)")]
+    public SpriteRenderer scanSprite;
+    public TMP_Text scanText;
+    public string scanningMessage = "SCAN THE QR CODE";
+
+    [Header("Scan Audio")]
+    public AudioSource scanAudioSource;
+    public AudioClip scanLoopClip;
+    public float scanSilenceSeconds = 5f;
+
+    private Coroutine scanAudioRoutine;
+    private Coroutine scanStateWatcher;
+
     private List<GameObject> navPoints = new List<GameObject>();
     private GameObject latestNavPoint;
 
@@ -31,6 +44,28 @@ public class CreatePathManager : MonoBehaviour
     {
         if (loadButton != null)
             loadButton.onClick.AddListener(OnLoadButtonClicked);
+
+        if (qrScanner != null && qrScanner.scanningEnabled)
+            StartScanFeedback();
+        else
+            StopScanFeedback();
+
+        if (scanStateWatcher != null) StopCoroutine(scanStateWatcher);
+        scanStateWatcher = StartCoroutine(WatchScanState());
+    }
+
+    void OnDisable()
+    {
+        if (scanStateWatcher != null)
+        {
+            StopCoroutine(scanStateWatcher);
+            scanStateWatcher = null;
+        }
+
+        StopScanFeedback();
+
+        if (qrScanner != null)
+            qrScanner.OnQRScanned -= HandleQRScanned;
     }
 
     public void CallPoint(int sliceIndex)
@@ -312,10 +347,12 @@ public class CreatePathManager : MonoBehaviour
         {
             qrScanner.OnQRScanned += HandleQRScanned;
             qrScanner.scanningEnabled = true;
+            StartScanFeedback();
         }
         else
         {
             Debug.LogError("QRPhotoScanner reference not set!");
+            StopScanFeedback();
         }
     }
 
@@ -329,6 +366,8 @@ public class CreatePathManager : MonoBehaviour
 
         Debug.Log($"[CreatePathManager] QR scanned: {qrMessage}");
 
+        StopScanFeedback();
+
         if (!string.IsNullOrWhiteSpace(qrMessage))
         {
             string_start = qrMessage;
@@ -339,10 +378,105 @@ public class CreatePathManager : MonoBehaviour
             Debug.LogWarning("[CreatePathManager] Scanned QR code is empty or invalid.");
         }
     }
+
+    private void StartScanFeedback()
+    {
+        if (scanSprite != null)
+        {
+            scanSprite.gameObject.SetActive(true);
+            scanSprite.enabled = true;
+        }
+
+        if (scanText != null)
+        {
+            var textGO = (scanText as Component).gameObject;
+            textGO.SetActive(true);
+            scanText.enabled = true;
+            if (!string.IsNullOrEmpty(scanningMessage))
+                scanText.text = scanningMessage;
+        }
+
+        if (scanAudioRoutine != null)
+        {
+            StopCoroutine(scanAudioRoutine);
+            scanAudioRoutine = null;
+        }
+        if (scanAudioSource != null && scanLoopClip != null)
+        {
+            scanAudioSource.loop = false;
+            scanAudioRoutine = StartCoroutine(ScanAudioLoop());
+        }
+        else
+        {
+            if (scanAudioSource == null) Debug.LogWarning("[CreatePathManager] Scan AudioSource not assigned.");
+            if (scanLoopClip == null) Debug.LogWarning("[CreatePathManager] Scan Loop Clip not assigned.");
+        }
+    }
+
+    private void StopScanFeedback()
+    {
+        if (scanSprite != null)
+        {
+            scanSprite.enabled = false;
+            scanSprite.gameObject.SetActive(false);
+        }
+
+        if (scanText != null)
+        {
+            scanText.enabled = false;
+            (scanText as Component).gameObject.SetActive(false);
+        }
+
+        if (scanAudioRoutine != null)
+        {
+            StopCoroutine(scanAudioRoutine);
+            scanAudioRoutine = null;
+        }
+        if (scanAudioSource != null)
+        {
+            scanAudioSource.Stop();
+        }
+    }
+
+    private IEnumerator ScanAudioLoop()
+    {
+        while (qrScanner != null && qrScanner.scanningEnabled)
+        {
+            if (scanAudioSource != null && scanLoopClip != null)
+            {
+                scanAudioSource.PlayOneShot(scanLoopClip);
+                yield return new WaitForSeconds(scanLoopClip.length);
+            }
+            else
+            {
+                yield break;
+            }
+
+            if (scanSilenceSeconds > 0f)
+                yield return new WaitForSeconds(scanSilenceSeconds);
+        }
+    }
+
+    private IEnumerator WatchScanState()
+    {
+        bool last = qrScanner != null && qrScanner.scanningEnabled;
+
+        if (last) StartScanFeedback();
+        else StopScanFeedback();
+
+        while (true)
+        {
+            bool current = qrScanner != null && qrScanner.scanningEnabled;
+            if (current != last)
+            {
+                if (current) StartScanFeedback();
+                else StopScanFeedback();
+                last = current;
+            }
+            yield return null;
+        }
+    }
 }
-
-
-
 
 
 
@@ -391,7 +525,7 @@ public class CreatePathManager : MonoBehaviour
 //            case 3: SavePath(); break;
 //            case 4: LoadPathMenu(); break;
 //            case 5: ClearPathsMenu(); break;
-//            case 6: StartGame(); break;           // New start-game case
+//            case 6: StartGame(); break;
 //            default:
 //                Debug.LogWarning($"[CreatePathManager] No action for slice {sliceIndex}");
 //                break;
@@ -446,16 +580,13 @@ public class CreatePathManager : MonoBehaviour
 
 //    private IEnumerator SavePathCoroutine()
 //    {
-//        // 1) Clear any existing anchors in the scene
 //        foreach (var anchor in FindObjectsOfType<OVRSpatialAnchor>())
 //            Destroy(anchor.gameObject);
 //        Debug.Log("[SavePath] Cleared existing anchors from scene.");
 
-//        // 2) Load anchors from anchors.json
 //        SpatialAnchorManager.Instance.LoadAnchorsFromJson();
 //        Debug.Log("[SavePath] Loading anchors from anchors.json...");
 
-//        // Wait up to 5 seconds for anchors to appear
 //        float timeout = 5f, timer = 0f;
 //        while (FindObjectsOfType<OVRSpatialAnchor>().Length == 0 && timer < timeout)
 //        {
@@ -470,13 +601,11 @@ public class CreatePathManager : MonoBehaviour
 //            yield break;
 //        }
 
-//        // 3) Use first anchor as reference
 //        var refAnchor = anchors[0].transform;
 //        Vector3 refPos = refAnchor.position;
 //        Quaternion refRot = refAnchor.rotation;
 //        Debug.Log($"[SavePath] Using anchor at {refPos} as reference.");
 
-//        // Build PathData
 //        string pathName = GenerateRandomName(4);
 //        var data = new PathData { pathName = pathName, points = new List<NavPointInfo>() };
 //        foreach (var go in navPoints)
@@ -495,7 +624,6 @@ public class CreatePathManager : MonoBehaviour
 //            });
 //        }
 
-//        // 4) Write JSON
 //        string json = JsonUtility.ToJson(data, true);
 //        string filePath = Path.Combine(Application.persistentDataPath, pathName + ".json");
 //        try
@@ -508,7 +636,6 @@ public class CreatePathManager : MonoBehaviour
 //            Debug.LogError($"[SavePath] Failed to save path: {e}");
 //        }
 
-//        // 5) Clear anchors & nav points
 //        foreach (var anchor in FindObjectsOfType<OVRSpatialAnchor>())
 //            Destroy(anchor.gameObject);
 //        DeleteAllNavPoints();
@@ -539,12 +666,10 @@ public class CreatePathManager : MonoBehaviour
 
 //    private IEnumerator LoadPathCoroutine()
 //    {
-//        // 1) Clear any anchors & nav points in the scene
 //        SpatialAnchorManager.Instance.ClearAnchors();
 //        DeleteAllNavPoints();
 //        Debug.Log("[LoadPath] Cleared existing anchors and nav points.");
 
-//        // 2) Ensure anchors.json exists
 //        string anchorsJson = Path.Combine(Application.persistentDataPath, "anchors.json");
 //        if (!File.Exists(anchorsJson))
 //        {
@@ -552,7 +677,6 @@ public class CreatePathManager : MonoBehaviour
 //            yield break;
 //        }
 
-//        // 3) Wait for anchors to load via event
 //        bool anchorsLoaded = false;
 //        List<OVRSpatialAnchor> loadedAnchors = null;
 //        void OnAnchorsLoaded(List<OVRSpatialAnchor> list)
@@ -576,13 +700,11 @@ public class CreatePathManager : MonoBehaviour
 //            yield break;
 //        }
 
-//        // 4) Use first anchor as reference
 //        Transform refT = loadedAnchors[0].transform;
 //        Vector3 refPos = refT.position;
 //        Quaternion refRot = refT.rotation;
 //        Debug.Log($"[LoadPath] Using anchor at {refPos} as reference.");
 
-//        // 5) Load nav-point JSON
 //        string selectedName = pathDropdown.options[pathDropdown.value].text;
 //        string pathFile = Path.Combine(Application.persistentDataPath, selectedName + ".json");
 //        if (!File.Exists(pathFile))
@@ -598,7 +720,6 @@ public class CreatePathManager : MonoBehaviour
 //            yield break;
 //        }
 
-//        // 6) Instantiate nav points in world space
 //        foreach (var info in data.points)
 //        {
 //            Vector3 worldPos = refRot * new Vector3(info.relX, info.relY, info.relZ) + refPos;
@@ -659,81 +780,26 @@ public class CreatePathManager : MonoBehaviour
 //    public GameObject GetLatestNavPoint() => latestNavPoint;
 //    public IReadOnlyList<GameObject> GetAllNavPoints() => navPoints.AsReadOnly();
 
-//    /// <summary>
-//    /// Clears anchors and nav points, then enables QR scanning.
-//    /// </summary>
-//    //public void StartGame()
-//    //{
-//    //    // Clear all spatial anchors if any exist
-//    //    if (SpatialAnchorManager.Instance != null)
-//    //        SpatialAnchorManager.Instance.ClearAnchors();
-
-//    //    // Clear all nav points if any exist
-//    //    if (navPoints.Count > 0)
-//    //        DeleteAllNavPoints();
-
-//    //    // Begin QR scanning
-//    //    if (qrScanner != null)
-//    //    {
-//    //        qrScanner.OnQRScanned += HandleQRScanned;
-//    //        qrScanner.scanningEnabled = true;
-//    //    }
-//    //    else
-//    //    {
-//    //        Debug.LogError("QRPhotoScanner reference not set!");
-//    //        return;
-//    //    }
-
-//    //    string_start = qrScanner.resultText;
-//    //    game_start = true;
-//    //}
-
-//    ///// <summary>
-//    ///// Called when a valid QR code is decoded.
-//    ///// </summary>
-//    //private void HandleQRScanned(string qrMessage)
-//    //{
-//    //    // Stop further scanning
-//    //    if (qrScanner != null)
-//    //    {
-//    //        qrScanner.scanningEnabled = false;
-//    //        qrScanner.OnQRScanned -= HandleQRScanned;
-//    //    }
-
-//    //    Debug.Log($"[CreatePathManager] QR scanned: {qrMessage}");
-//    //    // TODO: Add logic to handle the scanned message (e.g., start path creation using qrMessage)
-//    //}
-
-
 //    public void StartGame()
 //    {
-//        // Clear anchors if any exist in the scene via SpatialAnchorManager
-//        //if (SpatialAnchorManager.Instance != null &&
-//        //    SpatialAnchorManager.Instance.HasAnchorsInScene())
-//        //{
-//        //    SpatialAnchorManager.Instance.ClearAnchors();
-//        //}
+//        if (SpatialAnchorManager.Instance != null && SpatialAnchorManager.Instance.HasAnchorInScene())
+//        {
+//            SpatialAnchorManager.Instance.ClearOnlyAnchorPrefabs();
+//        }
 
-//        //// Clear nav points if any exist
-//        //if (navPoints.Count > 0)
-//        //    DeleteAllNavPoints();
+//        if (navPoints.Count > 0)
+//            DeleteAllNavPoints();
 
-//        //// Begin QR scanning
-//        //if (qrScanner != null)
-//        //{
-//        //    qrScanner.OnQRScanned += HandleQRScanned;
-//        //    qrScanner.scanningEnabled = true;
-//        //}
-//        //else
-//        //{
-//        //    Debug.LogError("QRPhotoScanner reference not set!");
-//        //}
-
-
+//        if (qrScanner != null)
+//        {
+//            qrScanner.OnQRScanned += HandleQRScanned;
+//            qrScanner.scanningEnabled = true;
+//        }
+//        else
+//        {
+//            Debug.LogError("QRPhotoScanner reference not set!");
+//        }
 //    }
-
-
-
 
 //    private void HandleQRScanned(string qrMessage)
 //    {
@@ -748,16 +814,13 @@ public class CreatePathManager : MonoBehaviour
 //        if (!string.IsNullOrWhiteSpace(qrMessage))
 //        {
 //            string_start = qrMessage;
-//            game_start = true; // This will now properly trigger GameManager
+//            game_start = true;
 //        }
 //        else
 //        {
 //            Debug.LogWarning("[CreatePathManager] Scanned QR code is empty or invalid.");
 //        }
 //    }
-
-
-
-
-
 //}
+
+
